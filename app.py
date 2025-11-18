@@ -138,9 +138,7 @@ def crear_grafico(df_p, tipo, fecha_base):
         # Si es OMIE, la fecha es MAÑANA respecto a hoy
         fecha_obj = datetime.now() + timedelta(days=1)
     else:
-        # Si es PVPC, el archivo ya trae la fecha futura, pero a veces hay que sumar 1 si es raw
-        # Asumimos que el CSV trae la fecha correcta del dato.
-        # En ESIOS el dato de "mañana" tiene fecha de mañana.
+        # Si es PVPC, el archivo ya trae la fecha futura
         fecha_obj = fecha_base 
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -260,9 +258,11 @@ if archivo:
                 for idx, row in df.iterrows():
                     # Formatear precio con coma
                     p_fmt = f"{row['p']:.2f}".replace('.', ',')
-                    txt_out += f"{row['h']}: {p_fmt} euros/MWh\n"
+                    
+                    # FORMATO LISTA (Viñeta)
+                    txt_out += f"- {row['h']}: {p_fmt} euros/MWh\n"
                 
-                st.text_area("Copiar lista:", value=txt_out, height=500)
+                st.text_area("Copiar lista:", value=txt_out, height=600)
         
         else:
-            st.error(f"Error: {tipo}") # 'tipo' aquí contiene el mensaje de error
+            st.error(f"Error: {tipo}")
