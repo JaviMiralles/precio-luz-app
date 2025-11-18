@@ -85,7 +85,6 @@ def procesar_archivo(uploaded_file):
                 
                 df_res = pd.DataFrame({'h': horas, 'p': precios})
                 tipo = "PVPC"
-                
             else:
                 return None, "El CSV no tiene columnas 'datetime' y 'value'", None
 
@@ -129,9 +128,17 @@ def crear_grafico(df_p, tipo, fecha_base):
         fecha_obj = fecha_base 
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    txt_fecha = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
+    
+    # Fecha formateada para el Título
+    txt_fecha_titulo = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
 
-    titulo_principal = f"Precio de la luz, {txt_fecha}"
+    # Fecha formateada para el Archivo (ej: precio-luz-horas-19-noviembre-2025)
+    nombre_mes = meses[fecha_obj.month - 1]
+    nombre_archivo_base = f"precio-luz-horas-{fecha_obj.day}-{nombre_mes}-{fecha_obj.year}"
+    if tipo == "PVPC":
+        nombre_archivo_base += "-pvpc"
+
+    titulo_principal = f"Precio de la luz, {txt_fecha_titulo}"
     texto_footer = "Fuente: OMIE"
     
     if tipo == "PVPC":
@@ -193,7 +200,7 @@ def crear_grafico(df_p, tipo, fecha_base):
     if not logo_puesto:
         fig.text(0.95, y_linea - 0.025, "NoticiasTrabajo", ha="right", va="top", fontsize=14, color='gray', **p_tit)
 
-    return fig
+    return fig, nombre_archivo_base
 
 # --- APP STREAMLIT ---
 st.title("⚡ Generador de Precios de la Luz")
@@ -216,27 +223,25 @@ if archivo:
             
             with col1:
                 st.subheader("Vista Previa")
-                fig = crear_grafico(df, tipo, fecha)
+                # Ahora la función devuelve la figura Y el nombre del archivo base
+                fig, nombre_base = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
-                # --- BOTONES DE DESCARGA ---
+                # --- BOTONES DE DESCARGA (Nombres dinámicos) ---
                 
-                # 1. Buffer para PNG
                 buf_png = io.BytesIO()
                 fig.savefig(buf_png, format='png', dpi=100, bbox_inches='tight')
                 
-                # 2. Buffer para JPG (Importante: facecolor white para evitar fondo negro)
                 buf_jpg = io.BytesIO()
                 fig.savefig(buf_jpg, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
 
-                # Mostrar botones en dos columnas
                 btn_col1, btn_col2 = st.columns(2)
                 
                 with btn_col1:
                     st.download_button(
                         label="⬇️ Descargar PNG",
                         data=buf_png,
-                        file_name=f"precio_luz_{tipo.lower()}.png",
+                        file_name=f"{nombre_base}.png",  # <--- NOMBRE DINÁMICO
                         mime="image/png",
                         use_container_width=True
                     )
@@ -245,7 +250,7 @@ if archivo:
                     st.download_button(
                         label="⬇️ Descargar JPG",
                         data=buf_jpg,
-                        file_name=f"precio_luz_{tipo.lower()}.jpg",
+                        file_name=f"{nombre_base}.jpg",  # <--- NOMBRE DINÁMICO
                         mime="image/jpeg",
                         use_container_width=True
                     )
