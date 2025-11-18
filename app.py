@@ -14,7 +14,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # --- CONFIGURACIÓN ---
-# Intentar importar cairosvg de forma segura
 try:
     import cairosvg
     SVG_AVAILABLE = True
@@ -69,7 +68,6 @@ def procesar_archivo(uploaded_file):
             df = pd.read_csv(uploaded_file, sep=';')
             df.columns = df.columns.str.lower()
             
-            # Filtros básicos
             if 'geoname' in df.columns: 
                 df = df[df['geoname'] == 'Península']
             
@@ -77,11 +75,9 @@ def procesar_archivo(uploaded_file):
                 df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('Europe/Madrid')
                 df = df.sort_values('datetime')
                 
-                # Extraer datos
                 precios = df['value'].values
-                fecha_ref = df['datetime'].iloc[0] # Fecha real del archivo
+                fecha_ref = df['datetime'].iloc[0]
                 
-                # Ajustar a 24h
                 horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(len(precios))]
                 if len(precios) > 24:
                     precios = precios[:24]
@@ -95,26 +91,22 @@ def procesar_archivo(uploaded_file):
 
         # CASO 2: EXCEL (OMIE)
         else:
-            # Intentamos leer con varias estrategias
             try: df = pd.read_csv(uploaded_file, skiprows=3, encoding='latin-1', sep=';')
             except: 
                 uploaded_file.seek(0)
                 df = pd.read_excel(uploaded_file)
             
-            # Buscar fila clave
             col0 = df.columns[0]
             mask = df[col0].astype(str).str.contains("Precio marginal", na=False, case=False)
             
             if mask.any():
                 fila = df[mask]
-                # Limpiar y extraer
                 vals = fila.iloc[0, 1:25].astype(str).str.replace(',', '.', regex=False).values.astype(float)
                 
                 horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(24)]
                 df_res = pd.DataFrame({'h': horas, 'p': vals})
                 
                 tipo = "OMIE"
-                # OMIE es para mañana (fecha actual + 1 día)
                 fecha_ref = datetime.now()
             else:
                 return None, "No se encontró 'Precio marginal' en el Excel", None
@@ -127,24 +119,18 @@ def procesar_archivo(uploaded_file):
 # --- GENERAR GRÁFICO ---
 def crear_grafico(df_p, tipo, fecha_base):
     f_tit, f_txt, f_bld = cargar_estilos()
-    
-    # Props fuentes
     p_tit = {'fontproperties': f_tit} if f_tit else {'fontweight': 'bold'}
     p_txt = {'fontproperties': f_txt} if f_txt else {}
     p_bld = {'fontproperties': f_bld} if f_bld else {'fontweight': 'bold'}
 
-    # Calcular Fecha Texto
     if tipo == "OMIE":
-        # Si es OMIE, la fecha es MAÑANA respecto a hoy
         fecha_obj = datetime.now() + timedelta(days=1)
     else:
-        # Si es PVPC, el archivo ya trae la fecha futura
         fecha_obj = fecha_base 
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     txt_fecha = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
 
-    # Títulos según tipo
     titulo_principal = f"Precio de la luz, {txt_fecha}"
     texto_footer = "Fuente: OMIE"
     
@@ -152,28 +138,22 @@ def crear_grafico(df_p, tipo, fecha_base):
         titulo_principal += " (PVPC)"
         texto_footer = "Fuente: Red Eléctrica de España"
 
-    # Colores
     df_p['rank'] = df_p['p'].rank(method='first')
     df_p['c'] = df_p['rank'].apply(lambda r: '#228000' if r<=8 else ('#f39c12' if r<=16 else '#f81203'))
 
-    # Plot
     fig, ax = plt.subplots(figsize=(7.94, 8.19), dpi=100)
     plt.subplots_adjust(top=0.80, bottom=0.12, left=0.22, right=0.98)
 
-    # Textos
     fig.text(0.5, 0.90, titulo_principal, ha='center', va='center', fontsize=20, color='black', **p_tit)
     fig.text(0.22, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
 
-    # Barras
     barras = ax.barh(df_p['h'], df_p['p'], color=df_p['c'], height=0.8)
     ax.invert_yaxis()
     ax.margins(y=0.01)
     
-    # Eje X extra
     if len(df_p) > 0:
         ax.set_xlim(0, df_p['p'].max() * 1.35)
 
-    # Estilos Ejes
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
@@ -189,19 +169,16 @@ def crear_grafico(df_p, tipo, fecha_base):
         if f_txt: l.set_fontproperties(f_txt)
         l.set_fontsize(10)
 
-    # Valores
     for b in barras:
         ax.text(b.get_width() + 1, b.get_y() + b.get_height()/2, 
                 f'{b.get_width():.2f}€/MWh', va='center', fontsize=10, color='black', **p_bld)
 
-    # Footer
     y_linea = 0.08
     linea = Line2D([0.05, 0.95], [y_linea, y_linea], transform=fig.transFigure, color=COLOR_BORDE_AZUL, linewidth=3)
     fig.add_artist(linea)
     
     fig.text(0.05, y_linea - 0.025, texto_footer, ha="left", va="top", fontsize=10, color='gray', **p_txt)
 
-    # Logo (con fallback seguro)
     logo_puesto = False
     if SVG_AVAILABLE:
         try:
@@ -222,8 +199,8 @@ def crear_grafico(df_p, tipo, fecha_base):
 st.title("⚡ Generador de Precios de la Luz")
 st.markdown("""
 Sube tu archivo y la herramienta detectará el formato automáticamente:
-* **Excel (.xls/xlsx):** Se tratará como datos de **OMIE**.
-* **CSV (.csv):** Se tratará como datos de **PVPC (Red Eléctrica)**.
+* **Excel (.xls/xlsx):** Datos de **OMIE**.
+* **CSV (.csv):** Datos de **PVPC**.
 """)
 
 archivo = st.file_uploader("Arrastra tu archivo aquí", type=['xls', 'xlsx', 'csv'])
@@ -242,10 +219,9 @@ if archivo:
                 fig = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
-                # Botón Descarga
                 buf = io.BytesIO()
                 fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-                btn = st.download_button(
+                st.download_button(
                     label="⬇️ Descargar Gráfico (PNG)",
                     data=buf,
                     file_name=f"precio_luz_{tipo.lower()}.png",
@@ -253,16 +229,23 @@ if archivo:
                 )
 
             with col2:
-                st.subheader("Listado de Texto")
-                txt_out = ""
+                st.subheader("Código HTML (Lista)")
+                st.caption("Copia este código y pégalo en la vista 'HTML' o 'Fuente' de tu editor.")
+                
+                # --- GENERACIÓN DEL HTML ---
+                html_out = "<ul>\n"
                 for idx, row in df.iterrows():
                     # Formatear precio con coma
                     p_fmt = f"{row['p']:.2f}".replace('.', ',')
                     
-                    # FORMATO LISTA (Viñeta)
-                    txt_out += f"- {row['h']}: {p_fmt} euros/MWh\n"
+                    # Ajustar formato hora fin 24:00 si es necesario
+                    # La columna 'h' ya viene como "00:00 a 01:00" del procesado anterior
+                    
+                    html_out += f"  <li>{row['h']}: {p_fmt} euros/MWh</li>\n"
+                html_out += "</ul>"
                 
-                st.text_area("Copiar lista:", value=txt_out, height=600)
+                # Usamos st.code con lenguaje 'html' para facilitar el copiado
+                st.code(html_out, language="html")
         
         else:
             st.error(f"Error: {tipo}")
