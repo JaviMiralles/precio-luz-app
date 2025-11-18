@@ -1,0 +1,6 @@
+streamlit
+pandas
+matplotlib
+cairosvg
+fonttools
+openpyxl
