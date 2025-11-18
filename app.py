@@ -219,32 +219,47 @@ if archivo:
                 fig = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
-                buf = io.BytesIO()
-                fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-                st.download_button(
-                    label="⬇️ Descargar Gráfico (PNG)",
-                    data=buf,
-                    file_name=f"precio_luz_{tipo.lower()}.png",
-                    mime="image/png"
-                )
+                # --- BOTONES DE DESCARGA ---
+                
+                # 1. Buffer para PNG
+                buf_png = io.BytesIO()
+                fig.savefig(buf_png, format='png', dpi=100, bbox_inches='tight')
+                
+                # 2. Buffer para JPG (Importante: facecolor white para evitar fondo negro)
+                buf_jpg = io.BytesIO()
+                fig.savefig(buf_jpg, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
+
+                # Mostrar botones en dos columnas
+                btn_col1, btn_col2 = st.columns(2)
+                
+                with btn_col1:
+                    st.download_button(
+                        label="⬇️ Descargar PNG",
+                        data=buf_png,
+                        file_name=f"precio_luz_{tipo.lower()}.png",
+                        mime="image/png",
+                        use_container_width=True
+                    )
+                
+                with btn_col2:
+                    st.download_button(
+                        label="⬇️ Descargar JPG",
+                        data=buf_jpg,
+                        file_name=f"precio_luz_{tipo.lower()}.jpg",
+                        mime="image/jpeg",
+                        use_container_width=True
+                    )
 
             with col2:
                 st.subheader("Código HTML (Lista)")
-                st.caption("Copia este código y pégalo en la vista 'HTML' o 'Fuente' de tu editor.")
+                st.caption("Copia este código y pégalo en tu editor:")
                 
-                # --- GENERACIÓN DEL HTML ---
                 html_out = "<ul>\n"
                 for idx, row in df.iterrows():
-                    # Formatear precio con coma
                     p_fmt = f"{row['p']:.2f}".replace('.', ',')
-                    
-                    # Ajustar formato hora fin 24:00 si es necesario
-                    # La columna 'h' ya viene como "00:00 a 01:00" del procesado anterior
-                    
                     html_out += f"  <li>{row['h']}: {p_fmt} euros/MWh</li>\n"
                 html_out += "</ul>"
                 
-                # Usamos st.code con lenguaje 'html' para facilitar el copiado
                 st.code(html_out, language="html")
         
         else:
