@@ -201,18 +201,17 @@ def crear_grafico(df_p, tipo, fecha_base):
 
 # --- APP STREAMLIT ---
 st.title("⚡ Generador de Precios de la Luz")
-st.markdown("""
-Sube tu archivo y la herramienta calculará el precio medio y comparará con ayer.
-""")
+st.markdown("Calculadora automática de gráficos, listados y comparativas para OMIE y PVPC.")
 
-# --- BARRA LATERAL PARA CONFIGURACIÓN ---
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.header("Configuración")
-    uploaded_file = st.file_uploader("Subir archivo (Excel/CSV)", type=['xls', 'xlsx', 'csv'])
+    st.header("1. Subir Archivo")
+    uploaded_file = st.file_uploader("Excel (OMIE) o CSV (PVPC)", type=['xls', 'xlsx', 'csv'])
     
     st.divider()
-    st.subheader("Datos Comparativos")
-    precio_ayer = st.number_input("Precio medio de AYER (€/MWh):", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+    st.header("2. Comparativa")
+    precio_ayer = st.number_input("Precio medio AYER (€/MWh):", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+    precio_anio_pasado = st.number_input("Precio medio AÑO PASADO (€/MWh):", min_value=0.0, value=0.0, step=0.01, format="%.2f")
 
 # --- LÓGICA PRINCIPAL ---
 if uploaded_file:
@@ -220,36 +219,63 @@ if uploaded_file:
         df, tipo, fecha = procesar_archivo(uploaded_file)
         
         if df is not None:
-            st.success(f"✅ Archivo **{tipo}** procesado correctamente.")
+            st.success(f"✅ Datos de **{tipo}** cargados.")
             
-            # --- CÁLCULOS ESTADÍSTICOS ---
+            # --- ESTADÍSTICAS ---
             precio_medio_hoy = df['p'].mean()
             
-            # Calcular diferencias si hay dato de ayer
-            diferencia_eur = 0.0
-            diferencia_porc = 0.0
-            mostrar_comparativa = False
+            # Datos Max y Min
+            row_min = df.loc[df['p'].idxmin()]
+            row_max = df.loc[df['p'].idxmax()]
             
-            if precio_ayer > 0:
-                diferencia_eur = precio_medio_hoy - precio_ayer
-                diferencia_porc = ((precio_medio_hoy - precio_ayer) / precio_ayer) * 100
-                mostrar_comparativa = True
+            # Generar textos Min/Max
+            h_min_fin = str(int(row_min['h'].split(':')[0]) + 1).zfill(2) + ":00" if "23:00" not in row_min['h'] else "24:00"
+            h_max_fin = str(int(row_max['h'].split(':')[0]) + 1).zfill(2) + ":00" if "23:00" not in row_max['h'] else "24:00"
 
-            # --- MOSTRAR METRICAS ---
-            st.markdown("### 📊 Resumen del Día")
+            # Formato especial para el texto de salida (quitando el "a HH:00" que ya trae la columna h si no cuadra)
+            # Nota: La columna 'h' ya viene formateada como "00:00 a 01:00", así que la usamos directa
+            texto_min = f"🟢 La hora más barata será de {row_min['h']} horas, con un precio de {row_min['p']:.2f}".replace('.', ',') + " euros/MWh"
+            texto_max = f"🔴 La hora más cara será de {row_max['h']} horas con un precio de {row_max['p']:.2f}".replace('.', ',') + " euros/MWh"
+
+            # --- SECCIÓN DE MÉTRICAS ---
+            st.markdown("### 📊 Resumen y Comparativa")
             col_met1, col_met2, col_met3 = st.columns(3)
             
-            col_met1.metric(label="Precio Medio HOY", value=f"{precio_medio_hoy:.2f} €/MWh")
+            col_met1.metric(label="Precio Medio HOY", value=f"{precio_medio_hoy:.2f} €")
             
-            if mostrar_comparativa:
-                col_met2.metric(label="Variación (€)", value=f"{diferencia_eur:.2f} €", delta=f"{diferencia_eur:.2f} €", delta_color="inverse")
-                col_met3.metric(label="Variación (%)", value=f"{diferencia_porc:.2f} %", delta=f"{diferencia_porc:.2f} %", delta_color="inverse")
+            # Comparativa Ayer
+            if precio_ayer > 0:
+                diff_ayer = precio_medio_hoy - precio_ayer
+                perc_ayer = (diff_ayer / precio_ayer) * 100
+                col_met2.metric("Vs. Ayer", f"{diff_ayer:.2f} €", f"{perc_ayer:.2f} %", delta_color="inverse")
             else:
-                col_met2.info("Introduce el precio de ayer en la barra lateral para ver la comparativa.")
+                col_met2.info("Pon el precio de ayer en el menú lateral.")
+
+            # Comparativa Año Pasado
+            if precio_anio_pasado > 0:
+                diff_anio = precio_medio_hoy - precio_anio_pasado
+                perc_anio = (diff_anio / precio_anio_pasado) * 100
+                col_met3.metric("Vs. Año Pasado", f"{diff_anio:.2f} €", f"{perc_anio:.2f} %", delta_color="inverse")
+            else:
+                col_met3.info("Pon el precio del año pasado en el menú.")
+
+            st.divider()
+            
+            # --- TEXTOS PARA COPIAR (HORAS CLAVE) ---
+            st.subheader("Frases destacadas (Copiar y Pegar)")
+            st.code(texto_min, language="text")
+            st.code(texto_max, language="text")
+            
+            # Texto resumen comparativo automático
+            resumen_txt = f"El precio medio de la luz para hoy es de {precio_medio_hoy:.2f} euros/MWh."
+            if precio_ayer > 0:
+                accion = "subido" if precio_medio_hoy > precio_ayer else "bajado"
+                resumen_txt += f" Esto supone que la luz ha {accion} un {abs((precio_medio_hoy - precio_ayer)/precio_ayer)*100:.2f}% respecto a ayer."
+            st.info(resumen_txt)
 
             st.divider()
 
-            # --- VISUALIZACIÓN ---
+            # --- GRÁFICO Y LISTA ---
             col1, col2 = st.columns([1.5, 1])
             
             with col1:
@@ -257,7 +283,6 @@ if uploaded_file:
                 fig, nombre_base = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
-                # Botones Descarga
                 buf_png = io.BytesIO()
                 fig.savefig(buf_png, format='png', dpi=100, bbox_inches='tight')
                 buf_jpg = io.BytesIO()
@@ -268,9 +293,7 @@ if uploaded_file:
                 b2.download_button("⬇️ Descargar JPG", buf_jpg, f"{nombre_base}.jpg", "image/jpeg", use_container_width=True)
 
             with col2:
-                st.subheader("Código HTML (Lista)")
-                st.caption("Copia este código para tu artículo:")
-                
+                st.subheader("Listado HTML")
                 html_out = "<ul>\n"
                 for idx, row in df.iterrows():
                     p_fmt = f"{row['p']:.2f}".replace('.', ',')
@@ -278,15 +301,8 @@ if uploaded_file:
                 html_out += "</ul>"
                 
                 st.code(html_out, language="html")
-                
-                # Texto adicional para el redactor
-                st.subheader("Datos para el texto")
-                st.write(f"**Precio medio:** {precio_medio_hoy:.2f} euros/MWh")
-                if mostrar_comparativa:
-                    subida_bajada = "subido" if diferencia_eur > 0 else "bajado"
-                    st.write(f"El precio ha **{subida_bajada}** un **{abs(diferencia_porc):.2f}%** respecto a ayer ({abs(diferencia_eur):.2f} euros).")
         
         else:
             st.error(f"Error: {tipo}")
 else:
-    st.info("👈 Utiliza la barra lateral para subir tu archivo y configurar los datos de ayer.")
+    st.info("👈 Utiliza el menú de la izquierda para empezar.")
