@@ -129,10 +129,7 @@ def crear_grafico(df_p, tipo, fecha_base):
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     
-    # Fecha formateada para el Título
     txt_fecha_titulo = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
-
-    # Fecha formateada para el Archivo (ej: precio-luz-horas-19-noviembre-2025)
     nombre_mes = meses[fecha_obj.month - 1]
     nombre_archivo_base = f"precio-luz-horas-{fecha_obj.day}-{nombre_mes}-{fecha_obj.year}"
     if tipo == "PVPC":
@@ -205,59 +202,74 @@ def crear_grafico(df_p, tipo, fecha_base):
 # --- APP STREAMLIT ---
 st.title("⚡ Generador de Precios de la Luz")
 st.markdown("""
-Sube tu archivo y la herramienta detectará el formato automáticamente:
-* **Excel (.xls/xlsx):** Datos de **OMIE**.
-* **CSV (.csv):** Datos de **PVPC**.
+Sube tu archivo y la herramienta calculará el precio medio y comparará con ayer.
 """)
 
-archivo = st.file_uploader("Arrastra tu archivo aquí", type=['xls', 'xlsx', 'csv'])
+# --- BARRA LATERAL PARA CONFIGURACIÓN ---
+with st.sidebar:
+    st.header("Configuración")
+    uploaded_file = st.file_uploader("Subir archivo (Excel/CSV)", type=['xls', 'xlsx', 'csv'])
+    
+    st.divider()
+    st.subheader("Datos Comparativos")
+    precio_ayer = st.number_input("Precio medio de AYER (€/MWh):", min_value=0.0, value=0.0, step=0.01, format="%.2f")
 
-if archivo:
-    with st.spinner("Procesando archivo..."):
-        df, tipo, fecha = procesar_archivo(archivo)
+# --- LÓGICA PRINCIPAL ---
+if uploaded_file:
+    with st.spinner("Procesando..."):
+        df, tipo, fecha = procesar_archivo(uploaded_file)
         
         if df is not None:
-            st.success(f"✅ Archivo detectado: **{tipo}**")
+            st.success(f"✅ Archivo **{tipo}** procesado correctamente.")
             
+            # --- CÁLCULOS ESTADÍSTICOS ---
+            precio_medio_hoy = df['p'].mean()
+            
+            # Calcular diferencias si hay dato de ayer
+            diferencia_eur = 0.0
+            diferencia_porc = 0.0
+            mostrar_comparativa = False
+            
+            if precio_ayer > 0:
+                diferencia_eur = precio_medio_hoy - precio_ayer
+                diferencia_porc = ((precio_medio_hoy - precio_ayer) / precio_ayer) * 100
+                mostrar_comparativa = True
+
+            # --- MOSTRAR METRICAS ---
+            st.markdown("### 📊 Resumen del Día")
+            col_met1, col_met2, col_met3 = st.columns(3)
+            
+            col_met1.metric(label="Precio Medio HOY", value=f"{precio_medio_hoy:.2f} €/MWh")
+            
+            if mostrar_comparativa:
+                col_met2.metric(label="Variación (€)", value=f"{diferencia_eur:.2f} €", delta=f"{diferencia_eur:.2f} €", delta_color="inverse")
+                col_met3.metric(label="Variación (%)", value=f"{diferencia_porc:.2f} %", delta=f"{diferencia_porc:.2f} %", delta_color="inverse")
+            else:
+                col_met2.info("Introduce el precio de ayer en la barra lateral para ver la comparativa.")
+
+            st.divider()
+
+            # --- VISUALIZACIÓN ---
             col1, col2 = st.columns([1.5, 1])
             
             with col1:
-                st.subheader("Vista Previa")
-                # Ahora la función devuelve la figura Y el nombre del archivo base
+                st.subheader("Gráfico")
                 fig, nombre_base = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
-                # --- BOTONES DE DESCARGA (Nombres dinámicos) ---
-                
+                # Botones Descarga
                 buf_png = io.BytesIO()
                 fig.savefig(buf_png, format='png', dpi=100, bbox_inches='tight')
-                
                 buf_jpg = io.BytesIO()
                 fig.savefig(buf_jpg, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
 
-                btn_col1, btn_col2 = st.columns(2)
-                
-                with btn_col1:
-                    st.download_button(
-                        label="⬇️ Descargar PNG",
-                        data=buf_png,
-                        file_name=f"{nombre_base}.png",  # <--- NOMBRE DINÁMICO
-                        mime="image/png",
-                        use_container_width=True
-                    )
-                
-                with btn_col2:
-                    st.download_button(
-                        label="⬇️ Descargar JPG",
-                        data=buf_jpg,
-                        file_name=f"{nombre_base}.jpg",  # <--- NOMBRE DINÁMICO
-                        mime="image/jpeg",
-                        use_container_width=True
-                    )
+                b1, b2 = st.columns(2)
+                b1.download_button("⬇️ Descargar PNG", buf_png, f"{nombre_base}.png", "image/png", use_container_width=True)
+                b2.download_button("⬇️ Descargar JPG", buf_jpg, f"{nombre_base}.jpg", "image/jpeg", use_container_width=True)
 
             with col2:
                 st.subheader("Código HTML (Lista)")
-                st.caption("Copia este código y pégalo en tu editor:")
+                st.caption("Copia este código para tu artículo:")
                 
                 html_out = "<ul>\n"
                 for idx, row in df.iterrows():
@@ -266,6 +278,15 @@ if archivo:
                 html_out += "</ul>"
                 
                 st.code(html_out, language="html")
+                
+                # Texto adicional para el redactor
+                st.subheader("Datos para el texto")
+                st.write(f"**Precio medio:** {precio_medio_hoy:.2f} euros/MWh")
+                if mostrar_comparativa:
+                    subida_bajada = "subido" if diferencia_eur > 0 else "bajado"
+                    st.write(f"El precio ha **{subida_bajada}** un **{abs(diferencia_porc):.2f}%** respecto a ayer ({abs(diferencia_eur):.2f} euros).")
         
         else:
             st.error(f"Error: {tipo}")
+else:
+    st.info("👈 Utiliza la barra lateral para subir tu archivo y configurar los datos de ayer.")
