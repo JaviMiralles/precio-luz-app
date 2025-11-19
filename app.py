@@ -20,7 +20,7 @@ try:
 except (OSError, ImportError):
     SVG_AVAILABLE = False
 
-st.set_page_config(page_title="Generador Precios Luz", layout="wide")
+st.set_page_config(page_title="Precio de la luz NoticiasTrabajo", layout="wide")
 
 # --- RECURSOS ---
 URL_LOGO = "https://noticiastrabajo.huffingtonpost.es/assets/logo-header-ntoD9DGMqO_Z1D8ye2.svg"
