@@ -53,58 +53,7 @@ def cargar_estilos():
             preparar_fuente(URL_FONT_TEXTO, "TiemposText"),
             preparar_fuente(URL_FONT_BOLD, "TiemposTextBold"))
 
-import os
-
-# --- LÓGICA DE TEXTOS (COPY) ---
-def obtener_momento_dia(hora):
-    """Devuelve el momento del día para el texto natural."""
-    if 0 <= hora < 7: return "de madrugada"
-    if 7 <= hora < 12: return "por la mañana"
-    if 12 <= hora < 16: return "a mediodía"
-    if 16 <= hora < 21: return "por la tarde"
-    return "por la noche"
-
-def generar_texto_rrss(df, tipo, fecha_base):
-    # Determinar fecha efectiva
-    if tipo == "OMIE":
-        fecha_obj = datetime.now() + timedelta(days=1)
-    else:
-        fecha_obj = fecha_base
-
-    dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-    meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    
-    dia_sem = dias_semana[fecha_obj.weekday()]
-    fecha_texto = f"{dia_sem}, {fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
-    
-    nombre_mercado = "Mercado Mayorista" if tipo == "OMIE" else "mercado regulado (PVPC)"
-
-    # Datos Min y Max
-    row_min = df.loc[df['p'].idxmin()]
-    row_max = df.loc[df['p'].idxmax()]
-    
-    # Extraer hora inicio numérica para el contexto
-    hora_min_num = int(row_min['h'].split(':')[0])
-    hora_max_num = int(row_max['h'].split(':')[0])
-    
-    momento_min = obtener_momento_dia(hora_min_num)
-    momento_max = obtener_momento_dia(hora_max_num)
-
-    # Formatear precios
-    p_min_fmt = f"{row_min['p']:.2f}".replace('.', ',')
-    p_max_fmt = f"{row_max['p']:.2f}".replace('.', ',')
-
-    copy = f"""💡 Consulta ya el precio de la luz para este {fecha_texto}, en el {nombre_mercado}.
-
-✅ Las horas más baratas se concentrarán {momento_min}, con el tramo de {row_min['h']} horas marcando el precio más bajo del día: {p_min_fmt} €/MWh.
-
-❌ Las más caras llegarán {momento_max}, especialmente de {row_max['h']} horas, cuando el importe alcanzará los {p_max_fmt} €/MWh.
-
-📊 Si quieres conocer el precio de la luz hora a hora, consulta el siguiente enlace:"""
-
-    return copy
-
-# --- PROCESAMIENTO ---
+# --- PROCESAMIENTO DE ARCHIVOS (UNIFICADO) ---
 def procesar_archivo(uploaded_file):
     filename = uploaded_file.name.lower()
     df_res = None
@@ -155,7 +104,7 @@ def procesar_archivo(uploaded_file):
                 df_res = pd.DataFrame({'h': horas, 'p': vals})
                 
                 tipo = "OMIE"
-                fecha_ref = datetime.now()
+                fecha_ref = datetime.now() # OMIE es hoy para mañana
             else:
                 return None, "No se encontró 'Precio marginal' en el Excel", None
 
@@ -177,13 +126,14 @@ def crear_grafico(df_p, tipo, fecha_base):
         fecha_obj = fecha_base 
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    txt_fecha = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
+    
+    txt_fecha_titulo = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
     nombre_mes = meses[fecha_obj.month - 1]
     nombre_archivo_base = f"precio-luz-horas-{fecha_obj.day}-{nombre_mes}-{fecha_obj.year}"
     if tipo == "PVPC":
         nombre_archivo_base += "-pvpc"
 
-    titulo_principal = f"Precio de la luz, {txt_fecha}"
+    titulo_principal = f"Precio de la luz, {txt_fecha_titulo}"
     texto_footer = "Fuente: OMIE"
     
     if tipo == "PVPC":
@@ -269,68 +219,77 @@ if uploaded_file:
         if df is not None:
             st.success(f"✅ Datos de **{tipo}** cargados.")
             
-            # --- ESTADÍSTICAS ---
+            # --- CÁLCULO DE ESTADÍSTICAS ---
             precio_medio_hoy = df['p'].mean()
             
-            # Generar el COPY para RRSS
-            copy_rrss = generar_texto_rrss(df, tipo, fecha)
+            # Datos Max y Min
+            row_min = df.loc[df['p'].idxmin()]
+            row_max = df.loc[df['p'].idxmax()]
+            
+            # Generar frases (Formato exacto solicitado)
+            texto_min = f"🟢 La hora más barata será de {row_min['h']} horas, con un precio de {row_min['p']:.2f}".replace('.', ',') + " euros/MWh"
+            texto_max = f"🔴 La hora más cara será de {row_max['h']} horas con un precio de {row_max['p']:.2f}".replace('.', ',') + " euros/MWh"
 
-            # --- SECCIÓN DE MÉTRICAS ---
+            # --- SECCIÓN DE MÉTRICAS (COMPARATIVA) ---
             st.markdown("### 📊 Resumen y Comparativa")
             col_met1, col_met2, col_met3 = st.columns(3)
+            
             col_met1.metric(label="Precio Medio HOY", value=f"{precio_medio_hoy:.2f} €")
             
+            # Comparativa Ayer
             if precio_ayer > 0:
                 diff_ayer = precio_medio_hoy - precio_ayer
                 perc_ayer = (diff_ayer / precio_ayer) * 100
                 col_met2.metric("Vs. Ayer", f"{diff_ayer:.2f} €", f"{perc_ayer:.2f} %", delta_color="inverse")
-            else: col_met2.info("Falta precio ayer")
+            else:
+                col_met2.info("Introduce precio de ayer.")
 
+            # Comparativa Año Pasado
             if precio_anio_pasado > 0:
                 diff_anio = precio_medio_hoy - precio_anio_pasado
                 perc_anio = (diff_anio / precio_anio_pasado) * 100
                 col_met3.metric("Vs. Año Pasado", f"{diff_anio:.2f} €", f"{perc_anio:.2f} %", delta_color="inverse")
-            else: col_met3.info("Falta precio año pasado")
+            else:
+                col_met3.info("Introduce precio año pasado.")
 
             st.divider()
-
-            # --- COLUMNAS DE CONTENIDO ---
-            col1, col2 = st.columns([1.4, 1])
             
-            # COLUMNA 1: GRÁFICO
+            # --- FRASES CLAVE (MIN/MAX) ---
+            st.subheader("Frases Clave (Copiar y Pegar)")
+            st.code(texto_min, language="text")
+            st.code(texto_max, language="text")
+            
+            st.divider()
+
+            # --- GRÁFICO Y LISTADO ---
+            col1, col2 = st.columns([1.5, 1])
+            
             with col1:
-                st.subheader("1. Gráfico")
+                st.subheader("Gráfico")
                 fig, nombre_base = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
+                # Buffers de descarga
                 buf_png = io.BytesIO()
                 fig.savefig(buf_png, format='png', dpi=100, bbox_inches='tight')
                 buf_jpg = io.BytesIO()
                 fig.savefig(buf_jpg, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
 
                 b1, b2 = st.columns(2)
-                b1.download_button("⬇️ PNG", buf_png, f"{nombre_base}.png", "image/png", use_container_width=True)
-                b2.download_button("⬇️ JPG", buf_jpg, f"{nombre_base}.jpg", "image/jpeg", use_container_width=True)
+                b1.download_button("⬇️ Descargar PNG", buf_png, f"{nombre_base}.png", "image/png", use_container_width=True)
+                b2.download_button("⬇️ Descargar JPG", buf_jpg, f"{nombre_base}.jpg", "image/jpeg", use_container_width=True)
 
-            # COLUMNA 2: TEXTOS
             with col2:
-                # Pestañas para organizar la información
-                tab1, tab2 = st.tabs(["📋 Listado HTML", "📱 Copy RRSS"])
+                st.subheader("Listado HTML")
+                html_out = "<ul>\n"
+                for idx, row in df.iterrows():
+                    p_fmt = f"{row['p']:.2f}".replace('.', ',')
+                    html_out += f"  <li>{row['h']}: {p_fmt} euros/MWh</li>\n"
+                html_out += "</ul>"
                 
-                with tab1:
-                    st.caption("Para pegar en el editor (modo código):")
-                    html_out = "<ul>\n"
-                    for idx, row in df.iterrows():
-                        p_fmt = f"{row['p']:.2f}".replace('.', ',')
-                        html_out += f"  <li>{row['h']}: {p_fmt} euros/MWh</li>\n"
-                    html_out += "</ul>"
-                    st.code(html_out, language="html")
-
-                with tab2:
-                    st.caption("Para publicar en redes sociales:")
-                    st.text_area("Texto RRSS:", value=copy_rrss, height=350)
+                st.code(html_out, language="html")
         
         else:
             st.error(f"Error: {tipo}")
 else:
-    st.info("👈 Utiliza el menú de la izquierda para empezar.")
+    st.info("👈 Empieza subiendo tu archivo en el menú de la izquierda.")
