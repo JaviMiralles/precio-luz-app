@@ -109,66 +109,6 @@ def generar_texto_rrss(df, tipo, fecha_base):
     return copy
 
 # --- PROCESAMIENTO ---
-def procesar_archivo(uploaded_file):
-    filename = uploaded_file.name.lower()
-    df_res = None
-    tipo = ""
-    fecha_ref = None
-    
-    try:
-        # CASO 1: CSV (PVPC / Red Eléctrica)
-        if filename.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep=';')
-            df.columns = df.columns.str.lower()
-            
-            if 'geoname' in df.columns: 
-                df = df[df['geoname'] == 'Península']
-            
-            if 'datetime' in df.columns and 'value' in df.columns:
-                df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('Europe/Madrid')
-                df = df.sort_values('datetime')
-                
-                precios = df['value'].values
-                fecha_ref = df['datetime'].iloc[0]
-                
-                horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(len(precios))]
-                if len(precios) > 24:
-                    precios = precios[:24]
-                    horas = horas[:24]
-                
-                df_res = pd.DataFrame({'h': horas, 'p': precios})
-                tipo = "PVPC"
-            else:
-                return None, "El CSV no tiene columnas 'datetime' y 'value'", None
-
-        # CASO 2: EXCEL (OMIE)
-        else:
-            try: df = pd.read_csv(uploaded_file, skiprows=3, encoding='latin-1', sep=';')
-            except: 
-                uploaded_file.seek(0)
-                df = pd.read_excel(uploaded_file)
-            
-            col0 = df.columns[0]
-            mask = df[col0].astype(str).str.contains("Precio marginal", na=False, case=False)
-            
-            if mask.any():
-                fila = df[mask]
-                vals = fila.iloc[0, 1:25].astype(str).str.replace(',', '.', regex=False).values.astype(float)
-                
-                horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(24)]
-                df_res = pd.DataFrame({'h': horas, 'p': vals})
-                
-                tipo = "OMIE"
-                fecha_ref = datetime.now()
-            else:
-                return None, "No se encontró 'Precio marginal' en el Excel", None
-
-        return df_res, tipo, fecha_ref
-
-    except Exception as e:
-        return None, f"Error leyendo archivo: {e}", None
-
-# --- GENERAR GRÁFICO ---
 def crear_grafico(df_p, tipo, fecha_base):
     # --- CARGA DE ESTILOS ---
     f_tit, f_txt, f_bld = cargar_estilos()
@@ -176,7 +116,7 @@ def crear_grafico(df_p, tipo, fecha_base):
     p_txt = {'fontproperties': f_txt} if f_txt else {}
     p_bld = {'fontproperties': f_bld} if f_bld else {'fontweight': 'bold'}
 
-    # --- FECHAS Y TÍTULOS ---
+    # --- FECHAS Y TEXTOS ---
     if tipo == "OMIE":
         fecha_obj = datetime.now() + timedelta(days=1)
     else:
@@ -184,87 +124,96 @@ def crear_grafico(df_p, tipo, fecha_base):
         
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     txt_fecha = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
-    nombre_mes = meses[fecha_obj.month - 1]
-    nombre_archivo_base = f"precio-luz-horas-{fecha_obj.day}-{nombre_mes}-{fecha_obj.year}"
-    if tipo == "PVPC": nombre_archivo_base += "-pvpc"
-
+    
     titulo_principal = f"Precio de la luz, {txt_fecha}"
-    texto_footer = "Fuente: OMIE" if tipo == "OMIE" else "Fuente: Red Eléctrica de España"
     if tipo == "PVPC": titulo_principal += " (PVPC)"
+    texto_footer = "Fuente: OMIE" if tipo == "OMIE" else "Fuente: Red Eléctrica de España"
 
-    # --- COLORES ---
+    # --- COLORES Y RANKING ---
     df_p['rank'] = df_p['p'].rank(method='first')
     df_p['c'] = df_p['rank'].apply(lambda r: '#228000' if r<=8 else ('#f39c12' if r<=16 else '#f81203'))
 
-    # --- FIGURA ---
-    # Ajustamos 'left' para asegurar espacio para las horas
+    # --- CONFIGURACIÓN DE FIGURA ---
     fig, ax = plt.subplots(figsize=(7.94, 8.19), dpi=100)
-    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.20, right=0.95)
+    # Aumentamos un poco más el 'left' (0.28) para que las horas tengan su espacio garantizado
+    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.28, right=0.95)
 
-    # Textos cabecera
     fig.text(0.5, 0.90, titulo_principal, ha='center', va='center', fontsize=20, color='black', **p_tit)
-    fig.text(0.20, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
+    fig.text(0.28, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
 
-    # --- DIBUJAR BARRAS ---
+    # Dibujamos las barras
     barras = ax.barh(df_p['h'], df_p['p'], color=df_p['c'], height=0.8)
-    ax.invert_yaxis() # La hora 00:00 arriba
-    
-    # --- LÓGICA DEL EJE X (TU IDEA) ---
+    ax.invert_yaxis() 
+
+    # --- CÁLCULO DE LÍMITES Y UMBRALES ---
     val_min = df_p['p'].min()
     val_max = df_p['p'].max()
     
-    # Calculamos un margen extra (15% del total) para que quepan los textos de los precios
+    # Rango total para calcular proporciones
     rango_total = val_max - val_min
-    if rango_total == 0: rango_total = 10 # Evitar división por cero
-    margen = rango_total * 0.15
-
-    # 1. Definir límite IZQUIERDO
-    # Si hay negativos, el límite es el mínimo menos margen. Si no, es 0.
-    limite_izq = (val_min - margen) if val_min < 0 else 0
+    if rango_total == 0: rango_total = 10
     
-    # 2. Definir límite DERECHO
-    # El máximo más el margen
-    limite_der = (val_max + margen) if val_max > 0 else 10
+    # Umbral: Si la barra mide más del 15% del gráfico, el texto cabe dentro
+    umbral_interior = rango_total * 0.15 
+    margen_offset = rango_total * 0.02 # Pequeña separación visual
 
-    # Aplicamos los límites calculados
+    # Definimos límites del gráfico (Eje X)
+    # Si hay negativos cortos, necesitamos espacio a la izquierda para su texto negro
+    # Si hay negativos largos, el texto va dentro (blanco), así que no necesitamos tanto margen extra
+    if val_min < 0:
+        limite_izq = val_min * 1.1 # Un 10% extra por seguridad
+    else:
+        limite_izq = 0
+        
+    limite_der = (val_max + (rango_total * 0.2)) if val_max > 0 else 10
+
     ax.set_xlim(limite_izq, limite_der)
-    
-    # Dibujamos línea vertical en el 0 para referencia
     ax.axvline(0, color='black', linewidth=0.8, alpha=0.3)
-    # ----------------------------------
 
-    # Limpieza del gráfico
+    # Limpieza visual
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
     ax.grid(axis='y', linestyle=':', alpha=0.5, color='gray')
     ax.xaxis.grid(False)
-    
-    # Ajustes eje Y (Horas)
     ax.tick_params(axis='y', length=0, labelsize=10, pad=10)
-    ax.set_xticks([]) # Quitamos números del eje X abajo
-    
+    ax.set_xticks([]) # Sin números abajo
+
     for l in ax.get_yticklabels():
         if f_txt: l.set_fontproperties(f_txt)
         l.set_fontsize(10)
 
-    # --- ETIQUETAS DE TEXTO DINÁMICAS ---
+    # --- LÓGICA HÍBRIDA (DENTRO / FUERA) ---
     for b in barras:
         ancho = b.get_width()
+        abs_ancho = abs(ancho)
         
-        # Si la barra es negativa, texto a la IZQUIERDA. Si positiva, a la DERECHA.
+        # PRECIO NEGATIVO
         if ancho < 0:
-            pos_x = ancho - (rango_total * 0.02) # Un pelín a la izquierda del final de la barra
-            align = 'right'
+            # CASO A: Barra larga -> Texto DENTRO (Color Blanco)
+            if abs_ancho > umbral_interior:
+                pos_x = ancho + margen_offset # Un poco a la derecha del borde final
+                align = 'left'                # Alineado a la izquierda (hacia el 0)
+                color_texto = 'white'
+            
+            # CASO B: Barra corta -> Texto FUERA (Color Negro)
+            else:
+                pos_x = ancho - margen_offset # Un poco a la izquierda del borde final
+                align = 'right'               # Alineado a la derecha (chocando con la barra)
+                color_texto = 'black'
+
+        # PRECIO POSITIVO O CERO
         else:
-            pos_x = ancho + (rango_total * 0.02) # Un pelín a la derecha
+            pos_x = ancho + margen_offset
             align = 'left'
+            color_texto = 'black'
 
+        # Escribimos el texto
         ax.text(pos_x, b.get_y() + b.get_height()/2, 
-                f'{ancho:.2f}€/MWh', va='center', ha=align, fontsize=10, color='black', **p_bld)
+                f'{ancho:.2f}€/MWh', va='center', ha=align, fontsize=10, color=color_texto, **p_bld)
 
-    # --- FOOTER Y LOGO ---
+    # --- PIE Y LOGO ---
     y_linea = 0.08
     linea = Line2D([0.05, 0.95], [y_linea, y_linea], transform=fig.transFigure, color=COLOR_BORDE_AZUL, linewidth=3)
     fig.add_artist(linea)
@@ -284,7 +233,7 @@ def crear_grafico(df_p, tipo, fecha_base):
     if not logo_puesto:
         fig.text(0.95, y_linea - 0.025, "NoticiasTrabajo", ha="right", va="top", fontsize=14, color='gray', **p_tit)
 
-    return fig, nombre_archivo_base
+    return fig, f"precio-luz-horas-{fecha_obj.day}-{meses[fecha_obj.month - 1]}-{fecha_obj.year}" + ("-pvpc" if tipo == "PVPC" else "")
 
 # --- APP STREAMLIT ---
 st.title("⚡ Generador de Precios de la Luz")
