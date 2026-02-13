@@ -207,8 +207,21 @@ def crear_grafico(df_p, tipo, fecha_base):
     ax.invert_yaxis()
     ax.margins(y=0.01)
     
-    if len(df_p) > 0:
-        ax.set_xlim(0, df_p['p'].max() * 1.35)
+    # --- CORRECCIÓN PRECIOS NEGATIVOS ---
+    val_min = df_p['p'].min()
+    val_max = df_p['p'].max()
+    
+    # Calculamos márgenes dinámicos
+    # Si el mínimo es negativo, damos un 20% extra hacia la izquierda
+    limite_izq = val_min * 1.2 if val_min < 0 else 0
+    # Límite derecho estándar
+    limite_der = val_max * 1.35 if val_max > 0 else 10 # Un mínimo por si todo fuera negativo
+    
+    ax.set_xlim(limite_izq, limite_der)
+    
+    # Línea vertical en el 0 para referencia visual
+    ax.axvline(0, color='black', linewidth=0.8, alpha=0.5)
+    # ------------------------------------
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -225,9 +238,21 @@ def crear_grafico(df_p, tipo, fecha_base):
         if f_txt: l.set_fontproperties(f_txt)
         l.set_fontsize(10)
 
+    # --- ETIQUETAS INTELIGENTES ---
     for b in barras:
-        ax.text(b.get_width() + 1, b.get_y() + b.get_height()/2, 
-                f'{b.get_width():.2f}€/MWh', va='center', fontsize=10, color='black', **p_bld)
+        width = b.get_width() # Valor del precio
+        
+        # Si es negativo, ponemos el texto a la izquierda
+        if width < 0:
+            x_pos = width - 1 # Un poco más a la izquierda del final de la barra
+            ha_align = 'right'
+        else:
+            x_pos = width + 1 # Un poco a la derecha
+            ha_align = 'left'
+
+        ax.text(x_pos, b.get_y() + b.get_height()/2, 
+                f'{width:.2f}€/MWh', va='center', ha=ha_align, fontsize=10, color='black', **p_bld)
+    # ------------------------------
 
     y_linea = 0.08
     linea = Line2D([0.05, 0.95], [y_linea, y_linea], transform=fig.transFigure, color=COLOR_BORDE_AZUL, linewidth=3)
