@@ -6,6 +6,7 @@ from matplotlib.lines import Line2D
 import matplotlib.font_manager as fm
 import io
 import urllib.request
+import os  # Importación movida al principio para evitar errores
 from fontTools.ttLib import TTFont
 from datetime import datetime, timedelta
 import warnings
@@ -52,8 +53,6 @@ def cargar_estilos():
     return (preparar_fuente(URL_FONT_TITULAR, "TiemposHeadline"),
             preparar_fuente(URL_FONT_TEXTO, "TiemposText"),
             preparar_fuente(URL_FONT_BOLD, "TiemposTextBold"))
-
-import os
 
 # --- LÓGICA COPY RRSS ---
 def obtener_momento_dia(hora):
@@ -109,6 +108,66 @@ def generar_texto_rrss(df, tipo, fecha_base):
     return copy
 
 # --- PROCESAMIENTO ---
+def procesar_archivo(uploaded_file):
+    filename = uploaded_file.name.lower()
+    df_res = None
+    tipo = ""
+    fecha_ref = None
+    
+    try:
+        # CASO 1: CSV (PVPC / Red Eléctrica)
+        if filename.endswith('.csv'):
+            df = pd.read_csv(uploaded_file, sep=';')
+            df.columns = df.columns.str.lower()
+            
+            if 'geoname' in df.columns: 
+                df = df[df['geoname'] == 'Península']
+            
+            if 'datetime' in df.columns and 'value' in df.columns:
+                df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('Europe/Madrid')
+                df = df.sort_values('datetime')
+                
+                precios = df['value'].values
+                fecha_ref = df['datetime'].iloc[0]
+                
+                horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(len(precios))]
+                if len(precios) > 24:
+                    precios = precios[:24]
+                    horas = horas[:24]
+                
+                df_res = pd.DataFrame({'h': horas, 'p': precios})
+                tipo = "PVPC"
+            else:
+                return None, "El CSV no tiene columnas 'datetime' y 'value'", None
+
+        # CASO 2: EXCEL (OMIE)
+        else:
+            try: df = pd.read_csv(uploaded_file, skiprows=3, encoding='latin-1', sep=';')
+            except: 
+                uploaded_file.seek(0)
+                df = pd.read_excel(uploaded_file)
+            
+            col0 = df.columns[0]
+            mask = df[col0].astype(str).str.contains("Precio marginal", na=False, case=False)
+            
+            if mask.any():
+                fila = df[mask]
+                vals = fila.iloc[0, 1:25].astype(str).str.replace(',', '.', regex=False).values.astype(float)
+                
+                horas = [f"{h:02d}:00 a {h+1:02d}:00" for h in range(24)]
+                df_res = pd.DataFrame({'h': horas, 'p': vals})
+                
+                tipo = "OMIE"
+                fecha_ref = datetime.now()
+            else:
+                return None, "No se encontró 'Precio marginal' en el Excel", None
+
+        return df_res, tipo, fecha_ref
+
+    except Exception as e:
+        return None, f"Error leyendo archivo: {e}", None
+
+# --- GENERAR GRÁFICO (VERSIÓN HÍBRIDA) ---
 def crear_grafico(df_p, tipo, fecha_base):
     # --- CARGA DE ESTILOS ---
     f_tit, f_txt, f_bld = cargar_estilos()
@@ -135,7 +194,7 @@ def crear_grafico(df_p, tipo, fecha_base):
 
     # --- CONFIGURACIÓN DE FIGURA ---
     fig, ax = plt.subplots(figsize=(7.94, 8.19), dpi=100)
-    # Aumentamos un poco más el 'left' (0.28) para que las horas tengan su espacio garantizado
+    # Aumentamos el 'left' (0.28) para asegurar espacio a las horas
     plt.subplots_adjust(top=0.80, bottom=0.12, left=0.28, right=0.95)
 
     fig.text(0.5, 0.90, titulo_principal, ha='center', va='center', fontsize=20, color='black', **p_tit)
@@ -156,16 +215,20 @@ def crear_grafico(df_p, tipo, fecha_base):
     # Umbral: Si la barra mide más del 15% del gráfico, el texto cabe dentro
     umbral_interior = rango_total * 0.15 
     margen_offset = rango_total * 0.02 # Pequeña separación visual
+    buffer_seguridad = rango_total * 0.25 # Espacio extra si el texto va fuera
 
     # Definimos límites del gráfico (Eje X)
-    # Si hay negativos cortos, necesitamos espacio a la izquierda para su texto negro
-    # Si hay negativos largos, el texto va dentro (blanco), así que no necesitamos tanto margen extra
     if val_min < 0:
-        limite_izq = val_min * 1.1 # Un 10% extra por seguridad
+        # Si la barra negativa es pequeña, el texto irá fuera, así que necesitamos MUCHO espacio a la izquierda
+        if abs(val_min) < umbral_interior:
+            limite_izq = val_min - buffer_seguridad
+        else:
+            # Si la barra es larga, el texto va dentro, necesitamos poco espacio extra
+            limite_izq = val_min * 1.1
     else:
         limite_izq = 0
         
-    limite_der = (val_max + (rango_total * 0.2)) if val_max > 0 else 10
+    limite_der = (val_max + buffer_seguridad) if val_max > 0 else 10
 
     ax.set_xlim(limite_izq, limite_der)
     ax.axvline(0, color='black', linewidth=0.8, alpha=0.3)
@@ -193,14 +256,14 @@ def crear_grafico(df_p, tipo, fecha_base):
         if ancho < 0:
             # CASO A: Barra larga -> Texto DENTRO (Color Blanco)
             if abs_ancho > umbral_interior:
-                pos_x = ancho + margen_offset # Un poco a la derecha del borde final
-                align = 'left'                # Alineado a la izquierda (hacia el 0)
+                pos_x = ancho + margen_offset # Un poco a la derecha del borde final (hacia dentro)
+                align = 'left'                
                 color_texto = 'white'
             
             # CASO B: Barra corta -> Texto FUERA (Color Negro)
             else:
-                pos_x = ancho - margen_offset # Un poco a la izquierda del borde final
-                align = 'right'               # Alineado a la derecha (chocando con la barra)
+                pos_x = ancho - margen_offset # Un poco a la izquierda del borde final (hacia fuera)
+                align = 'right'               
                 color_texto = 'black'
 
         # PRECIO POSITIVO O CERO
@@ -300,6 +363,7 @@ if uploaded_file:
             
             with col1:
                 st.subheader("1. Gráfico")
+                # Llamada segura con todas las importaciones listas
                 fig, nombre_base = crear_grafico(df, tipo, fecha)
                 st.pyplot(fig)
                 
