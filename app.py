@@ -197,32 +197,42 @@ def crear_grafico(df_p, tipo, fecha_base):
     df_p['rank'] = df_p['p'].rank(method='first')
     df_p['c'] = df_p['rank'].apply(lambda r: '#228000' if r<=8 else ('#f39c12' if r<=16 else '#f81203'))
 
+    # Ajustamos márgenes: 'left' controla dónde empieza el gráfico respecto al borde de la imagen
     fig, ax = plt.subplots(figsize=(7.94, 8.19), dpi=100)
-    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.22, right=0.98)
+    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.25, right=0.95) # left=0.25 da más espacio a las horas
 
     fig.text(0.5, 0.90, titulo_principal, ha='center', va='center', fontsize=20, color='black', **p_tit)
-    fig.text(0.22, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
+    fig.text(0.25, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
 
     barras = ax.barh(df_p['h'], df_p['p'], color=df_p['c'], height=0.8)
     ax.invert_yaxis()
     ax.margins(y=0.01)
     
-    # --- CORRECCIÓN PRECIOS NEGATIVOS ---
+    # --- CÁLCULO DE LÍMITES INTELIGENTE ---
     val_min = df_p['p'].min()
     val_max = df_p['p'].max()
     
-    # Calculamos márgenes dinámicos
-    # Si el mínimo es negativo, damos un 20% extra hacia la izquierda
-    limite_izq = val_min * 1.2 if val_min < 0 else 0
-    # Límite derecho estándar
-    limite_der = val_max * 1.35 if val_max > 0 else 10 # Un mínimo por si todo fuera negativo
+    # Definimos un "buffer" mínimo. Aunque los precios sean positivos,
+    # forzamos que el gráfico empiece en negativo (ej: -10) para crear espacio visual
+    # entre las horas y la barra del cero.
+    rango = val_max - val_min
+    if rango == 0: rango = 10
     
+    buffer_seguridad = max(rango * 0.15, 5) # Mínimo 5 unidades de aire
+    
+    # El límite izquierdo siempre será menor que 0 para separar las labels
+    if val_min < 0:
+        limite_izq = val_min - buffer_seguridad
+    else:
+        limite_izq = -buffer_seguridad # Si todo es positivo, forzamos espacio blanco
+        
+    limite_der = val_max * 1.35 if val_max > 0 else 10
+
     ax.set_xlim(limite_izq, limite_der)
     
-    # Línea vertical en el 0 para referencia visual
+    # Línea vertical del CERO bien marcada
     ax.axvline(0, color='black', linewidth=0.8, alpha=0.5)
-    # ------------------------------------
-
+    
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
@@ -231,28 +241,32 @@ def crear_grafico(df_p, tipo, fecha_base):
     ax.xaxis.grid(False)
     ax.set_axisbelow(True)
     
-    ax.tick_params(axis='y', length=0, labelsize=10, pad=8)
+    # 'pad=10' aleja las horas (labels) del inicio del gráfico
+    ax.tick_params(axis='y', length=0, labelsize=10, pad=10)
     ax.set_xticks([])
     
     for l in ax.get_yticklabels():
         if f_txt: l.set_fontproperties(f_txt)
         l.set_fontsize(10)
 
-    # --- ETIQUETAS INTELIGENTES ---
+    # --- ETIQUETAS DE PRECIO ---
     for b in barras:
-        width = b.get_width() # Valor del precio
+        width = b.get_width()
         
-        # Si es negativo, ponemos el texto a la izquierda
+        # Lógica para posicionar el texto
         if width < 0:
-            x_pos = width - 1 # Un poco más a la izquierda del final de la barra
+            # Barra negativa: Texto a su izquierda
+            x_pos = width - 0.5 
             ha_align = 'right'
+            txt_color = 'black' # O rojo si prefieres resaltar lo negativo
         else:
-            x_pos = width + 1 # Un poco a la derecha
+            # Barra positiva o cero: Texto a su derecha
+            x_pos = width + 0.5
             ha_align = 'left'
+            txt_color = 'black'
 
         ax.text(x_pos, b.get_y() + b.get_height()/2, 
-                f'{width:.2f}€/MWh', va='center', ha=ha_align, fontsize=10, color='black', **p_bld)
-    # ------------------------------
+                f'{width:.2f}€/MWh', va='center', ha=ha_align, fontsize=10, color=txt_color, **p_bld)
 
     y_linea = 0.08
     linea = Line2D([0.05, 0.95], [y_linea, y_linea], transform=fig.transFigure, color=COLOR_BORDE_AZUL, linewidth=3)
