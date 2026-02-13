@@ -170,11 +170,13 @@ def procesar_archivo(uploaded_file):
 
 # --- GENERAR GRÁFICO ---
 def crear_grafico(df_p, tipo, fecha_base):
+    # --- CARGA DE ESTILOS ---
     f_tit, f_txt, f_bld = cargar_estilos()
     p_tit = {'fontproperties': f_tit} if f_tit else {'fontweight': 'bold'}
     p_txt = {'fontproperties': f_txt} if f_txt else {}
     p_bld = {'fontproperties': f_bld} if f_bld else {'fontweight': 'bold'}
 
+    # --- FECHAS Y TÍTULOS ---
     if tipo == "OMIE":
         fecha_obj = datetime.now() + timedelta(days=1)
     else:
@@ -184,94 +186,88 @@ def crear_grafico(df_p, tipo, fecha_base):
     txt_fecha = f"{fecha_obj.day} de {meses[fecha_obj.month - 1]} de {fecha_obj.year}"
     nombre_mes = meses[fecha_obj.month - 1]
     nombre_archivo_base = f"precio-luz-horas-{fecha_obj.day}-{nombre_mes}-{fecha_obj.year}"
-    if tipo == "PVPC":
-        nombre_archivo_base += "-pvpc"
+    if tipo == "PVPC": nombre_archivo_base += "-pvpc"
 
     titulo_principal = f"Precio de la luz, {txt_fecha}"
-    texto_footer = "Fuente: OMIE"
-    
-    if tipo == "PVPC":
-        titulo_principal += " (PVPC)"
-        texto_footer = "Fuente: Red Eléctrica de España"
+    texto_footer = "Fuente: OMIE" if tipo == "OMIE" else "Fuente: Red Eléctrica de España"
+    if tipo == "PVPC": titulo_principal += " (PVPC)"
 
+    # --- COLORES ---
     df_p['rank'] = df_p['p'].rank(method='first')
     df_p['c'] = df_p['rank'].apply(lambda r: '#228000' if r<=8 else ('#f39c12' if r<=16 else '#f81203'))
 
-    # Ajustamos márgenes: 'left' controla dónde empieza el gráfico respecto al borde de la imagen
+    # --- FIGURA ---
+    # Ajustamos 'left' para asegurar espacio para las horas
     fig, ax = plt.subplots(figsize=(7.94, 8.19), dpi=100)
-    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.25, right=0.95) # left=0.25 da más espacio a las horas
+    plt.subplots_adjust(top=0.80, bottom=0.12, left=0.20, right=0.95)
 
+    # Textos cabecera
     fig.text(0.5, 0.90, titulo_principal, ha='center', va='center', fontsize=20, color='black', **p_tit)
-    fig.text(0.25, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
+    fig.text(0.20, 0.82, "Precio (EUR/MWh)", ha='left', va='bottom', fontsize=10, color='#444', **p_txt)
 
+    # --- DIBUJAR BARRAS ---
     barras = ax.barh(df_p['h'], df_p['p'], color=df_p['c'], height=0.8)
-    ax.invert_yaxis()
-    ax.margins(y=0.01)
+    ax.invert_yaxis() # La hora 00:00 arriba
     
-    # --- CÁLCULO DE LÍMITES INTELIGENTE ---
+    # --- LÓGICA DEL EJE X (TU IDEA) ---
     val_min = df_p['p'].min()
     val_max = df_p['p'].max()
     
-    # Definimos un "buffer" mínimo. Aunque los precios sean positivos,
-    # forzamos que el gráfico empiece en negativo (ej: -10) para crear espacio visual
-    # entre las horas y la barra del cero.
-    rango = val_max - val_min
-    if rango == 0: rango = 10
-    
-    buffer_seguridad = max(rango * 0.15, 5) # Mínimo 5 unidades de aire
-    
-    # El límite izquierdo siempre será menor que 0 para separar las labels
-    if val_min < 0:
-        limite_izq = val_min - buffer_seguridad
-    else:
-        limite_izq = -buffer_seguridad # Si todo es positivo, forzamos espacio blanco
-        
-    limite_der = val_max * 1.35 if val_max > 0 else 10
+    # Calculamos un margen extra (15% del total) para que quepan los textos de los precios
+    rango_total = val_max - val_min
+    if rango_total == 0: rango_total = 10 # Evitar división por cero
+    margen = rango_total * 0.15
 
+    # 1. Definir límite IZQUIERDO
+    # Si hay negativos, el límite es el mínimo menos margen. Si no, es 0.
+    limite_izq = (val_min - margen) if val_min < 0 else 0
+    
+    # 2. Definir límite DERECHO
+    # El máximo más el margen
+    limite_der = (val_max + margen) if val_max > 0 else 10
+
+    # Aplicamos los límites calculados
     ax.set_xlim(limite_izq, limite_der)
     
-    # Línea vertical del CERO bien marcada
-    ax.axvline(0, color='black', linewidth=0.8, alpha=0.5)
-    
+    # Dibujamos línea vertical en el 0 para referencia
+    ax.axvline(0, color='black', linewidth=0.8, alpha=0.3)
+    # ----------------------------------
+
+    # Limpieza del gráfico
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
     ax.grid(axis='y', linestyle=':', alpha=0.5, color='gray')
     ax.xaxis.grid(False)
-    ax.set_axisbelow(True)
     
-    # 'pad=10' aleja las horas (labels) del inicio del gráfico
+    # Ajustes eje Y (Horas)
     ax.tick_params(axis='y', length=0, labelsize=10, pad=10)
-    ax.set_xticks([])
+    ax.set_xticks([]) # Quitamos números del eje X abajo
     
     for l in ax.get_yticklabels():
         if f_txt: l.set_fontproperties(f_txt)
         l.set_fontsize(10)
 
-    # --- ETIQUETAS DE PRECIO ---
+    # --- ETIQUETAS DE TEXTO DINÁMICAS ---
     for b in barras:
-        width = b.get_width()
+        ancho = b.get_width()
         
-        # Lógica para posicionar el texto
-        if width < 0:
-            # Barra negativa: Texto a su izquierda
-            x_pos = width - 0.5 
-            ha_align = 'right'
-            txt_color = 'black' # O rojo si prefieres resaltar lo negativo
+        # Si la barra es negativa, texto a la IZQUIERDA. Si positiva, a la DERECHA.
+        if ancho < 0:
+            pos_x = ancho - (rango_total * 0.02) # Un pelín a la izquierda del final de la barra
+            align = 'right'
         else:
-            # Barra positiva o cero: Texto a su derecha
-            x_pos = width + 0.5
-            ha_align = 'left'
-            txt_color = 'black'
+            pos_x = ancho + (rango_total * 0.02) # Un pelín a la derecha
+            align = 'left'
 
-        ax.text(x_pos, b.get_y() + b.get_height()/2, 
-                f'{width:.2f}€/MWh', va='center', ha=ha_align, fontsize=10, color=txt_color, **p_bld)
+        ax.text(pos_x, b.get_y() + b.get_height()/2, 
+                f'{ancho:.2f}€/MWh', va='center', ha=align, fontsize=10, color='black', **p_bld)
 
+    # --- FOOTER Y LOGO ---
     y_linea = 0.08
     linea = Line2D([0.05, 0.95], [y_linea, y_linea], transform=fig.transFigure, color=COLOR_BORDE_AZUL, linewidth=3)
     fig.add_artist(linea)
-    
     fig.text(0.05, y_linea - 0.025, texto_footer, ha="left", va="top", fontsize=10, color='gray', **p_txt)
 
     logo_puesto = False
